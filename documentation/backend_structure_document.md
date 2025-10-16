@@ -1,179 +1,265 @@
 # Backend Structure Document
 
-This document outlines the backend architecture, hosting, and infrastructure for the **codeguide-starter** project. It uses plain language so anyone can understand how the backend is set up and how it supports the application.
-
 ## 1. Backend Architecture
 
-- **Framework and Design Pattern**
-  - We use **Next.js API Routes** to handle all server-side logic. These routes live alongside the frontend code in the same repository, making development and deployment simpler.
-  - The backend follows a **layered pattern**:
-    1. **API Layer**: Receives requests (login, registration, data fetch).  
-    2. **Service Layer**: Contains the core business logic (user validation, password hashing).  
-    3. **Data Access Layer**: Talks to the database via a simple ORM (e.g., Prisma or TypeORM).
+This section describes how the backend of the codeguide-flower-ecommerce project is organized and why it’s designed that way.
 
-- **Scalability**
-  - Stateless API routes can scale horizontally—new instances can spin up on demand.  
-  - We can add caching or a message queue (e.g., Redis or RabbitMQ) without changing the core code.
+• Overall design
+  - Built on Next.js API Routes: each endpoint lives alongside the frontend code, making it easy to see how data flows.  
+  - Uses Better Auth for handling sign-up, sign-in, sessions, and access control.  
+  - Drizzle ORM sits between the code and PostgreSQL, providing type-safe queries and migrations.
 
-- **Maintainability**
-  - Code for each feature is grouped by route (authentication, dashboard).  
-  - A service layer separates complex logic from request handling.
+• Design patterns and frameworks
+  - Controller pattern: each API route acts like a controller, handling requests and returning JSON.  
+  - Repository layer (via Drizzle ORM): abstracts database operations so business logic stays clean.  
+  - Middleware: authentication checks run before protected routes, ensuring only logged-in users can access certain data.
 
-- **Performance**
-  - Lightweight Node.js handlers keep response times low.  
-  - Future use of database connection pooling and Redis for caching repeated queries.
+• Scalability, maintainability, performance
+  - Serverless functions on Vercel automatically scale with traffic—no manual provisioning needed.  
+  - TypeScript everywhere reduces runtime errors and makes refactoring safer.  
+  - Clear separation of concerns (API routes vs. database vs. UI) keeps the code easy to maintain.  
+  - Server-side rendering (SSR) of product pages boosts SEO and speeds up first-load times for customers.
+
+---
 
 ## 2. Database Management
 
-- **Database Choice**
-  - We recommend **PostgreSQL** for structured data and reliable transactions.  
-  - In-memory caching can be added later with **Redis** for session tokens or frequently read data.
+This section explains the database technologies, how data is organized, and key practices.
 
-- **Data Storage and Access**
-  - Use an ORM like **Prisma** or **TypeORM** to map JavaScript/TypeScript objects to database tables.
-  - Connection pooling ensures efficient use of database connections under load.
-  - Migrations track schema changes over time, keeping development, staging, and production in sync.
+• Technologies used:
+  - PostgreSQL (relational SQL database)  
+  - Drizzle ORM (type-safe ORM for building queries and migrations)
 
-- **Data Practices**
-  - Passwords are never stored in plain text—they are salted and hashed with **bcrypt** before saving.
-  - All outgoing data is typed and validated to prevent malformed records.
+• Data structure and access
+  - Tables represent entities like users, sessions, products, categories, orders, and order items.  
+  - Drizzle ORM generates SQL under the hood, so developers write queries in TypeScript rather than raw SQL.  
+  - Migrations are managed via Drizzle CLI, ensuring schema changes are applied consistently across environments.
+
+• Best practices
+  - Index foreign keys (e.g., `product.categoryId`, `order.userId`) for faster JOINs.  
+  - Enforce not-null and unique constraints on critical columns (e.g., `users.email`).  
+  - Use database transactions for multi-step operations (like creating an order and its items) to maintain data integrity.
+
+---
 
 ## 3. Database Schema
 
-### Human-Readable Format
+Below is a human-readable overview of each table, followed by the PostgreSQL schema in SQL.
 
-- **Users**
-  - **id**: Unique identifier  
-  - **email**: User’s email address (unique)  
-  - **password_hash**: Securely hashed password  
-  - **created_at**: Account creation timestamp
+### Human-Readable Schema
 
-- **Sessions**
-  - **id**: Unique session record  
-  - **user_id**: Links to a user  
-  - **token**: Random string for authentication  
-  - **expires_at**: When the token stops working  
-  - **created_at**: When the session was created
+• Users  
+  - id (primary key)  
+  - email (unique, required)  
+  - passwordHash  
+  - createdAt, updatedAt
 
-- **DashboardItems** *(optional for dynamic data)*
-  - **id**: Unique record  
-  - **title**: Item title  
-  - **content**: Item details  
-  - **created_at**: When the item was added
+• Sessions  
+  - id (primary key)  
+  - userId (foreign key → Users.id)  
+  - expiresAt
 
-### SQL Schema (PostgreSQL)
+• Categories  
+  - id (primary key)  
+  - name (unique)  
+  - createdAt
+
+• Products  
+  - id (primary key)  
+  - name  
+  - description  
+  - price  
+  - imageUrl  
+  - stockQuantity  
+  - categoryId (foreign key → Categories.id)  
+  - createdAt, updatedAt
+
+• Orders  
+  - id (primary key)  
+  - userId (foreign key → Users.id)  
+  - totalAmount  
+  - status (e.g., “pending,” “paid,” “shipped”)  
+  - createdAt
+
+• OrderItems  
+  - id (primary key)  
+  - orderId (foreign key → Orders.id)  
+  - productId (foreign key → Products.id)  
+  - quantity  
+  - unitPrice
+
+### PostgreSQL Schema (SQL)
+
 ```sql
--- Users table
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
   email VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Sessions table
 CREATE TABLE sessions (
   id SERIAL PRIMARY KEY,
-  user_id INT REFERENCES users(id) ON DELETE CASCADE,
-  token VARCHAR(255) UNIQUE NOT NULL,
-  expires_at TIMESTAMPTZ NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
--- Dashboard items table
-CREATE TABLE dashboard_items (
+CREATE TABLE categories (
   id SERIAL PRIMARY KEY,
-  title TEXT NOT NULL,
-  content TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
+  name VARCHAR(100) UNIQUE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-```  
+
+CREATE TABLE products (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  price NUMERIC(10,2) NOT NULL,
+  image_url TEXT,
+  stock_quantity INTEGER NOT NULL DEFAULT 0,
+  category_id INTEGER REFERENCES categories(id),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE orders (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id),
+  total_amount NUMERIC(10,2) NOT NULL,
+  status VARCHAR(50) NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE order_items (
+  id SERIAL PRIMARY KEY,
+  order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+  product_id INTEGER REFERENCES products(id),
+  quantity INTEGER NOT NULL,
+  unit_price NUMERIC(10,2) NOT NULL
+);
+```
+
+---
 
 ## 4. API Design and Endpoints
 
-- **Approach**: We follow a **RESTful** style, grouping related endpoints under `/api` directories.
+We use RESTful endpoints implemented via Next.js API Routes. Each route lives under `pages/api` or `app/api`.
 
-- **Key Endpoints**
-  - `POST /api/auth/register`  
-    • Accepts `{ email, password }`  
-    • Creates a new user and issues a session token  
-  - `POST /api/auth/login`  
-    • Accepts `{ email, password }`  
-    • Verifies credentials and returns a session token  
-  - `POST /api/auth/logout`  
-    • Invalidates the session token on the server  
-  - `GET /api/dashboard/data`  
-    • Requires a valid session  
-    • Returns user-specific data or dashboard items  
+• Auth endpoints
+  - POST /api/auth/sign-up → creates a new user  
+  - POST /api/auth/sign-in → validates credentials and starts a session  
+  - POST /api/auth/sign-out → ends the session  
+  - GET  /api/auth/session → retrieves current session info
 
-- **Communication**
-  - Frontend sends JSON requests; backend replies with JSON and appropriate HTTP status codes.  
-  - Protected routes check for a valid session token (in cookies or Authorization header).
+• Product and category endpoints
+  - GET    /api/products → list all products  
+  - GET    /api/products/[id] → get details for one product  
+  - POST   /api/products → add a new product (admin only)  
+  - PUT    /api/products/[id] → update a product (admin only)  
+  - DELETE /api/products/[id] → remove a product (admin only)  
+  - GET    /api/categories → list all categories
+
+• Order endpoints
+  - GET  /api/orders → list orders for the logged-in user  
+  - POST /api/orders → create a new order and its items  
+  - GET  /api/orders/[id] → fetch a single order’s details
+
+• Cart (optional)
+  - GET    /api/cart → retrieve the user’s current cart  
+  - POST   /api/cart  → add or update items in the cart  
+  - DELETE /api/cart  → clear or remove items from the cart
+
+Each endpoint returns JSON and appropriate HTTP status codes. Protected routes check for a valid session cookie via middleware.
+
+---
 
 ## 5. Hosting Solutions
 
-- **Cloud Provider**:  
-  - **Vercel** (recommended) offers seamless Next.js deployments, auto-scaling, and built-in CDN.  
-  - Alternatively, **Netlify** or any Node.js-capable host will work.
+• Development environment
+  - Docker & Docker Compose: spins up both the Next.js app and PostgreSQL with a single command, ensuring dev/prod parity.
 
-- **Benefits**
-  - **Reliability**: Global servers and failover across regions.  
-  - **Scalability**: Auto-scale serverless functions based on traffic.  
-  - **Cost-Effectiveness**: Pay-per-use model means low cost for small projects.
+• Production environment
+  - Vercel: our recommended host, offering:  
+    - Automatic deployments on every push  
+    - Serverless functions for API Routes  
+    - Global Edge Network (CDN) for static assets  
+    - Built-in environment variable management
+
+Benefits:
+  - Reliability: Vercel SLA and automatic rollbacks.  
+  - Scalability: serverless endpoints scale to zero or handle high traffic without manual tuning.  
+  - Cost-effectiveness: pay only for the compute and bandwidth you use.
+
+---
 
 ## 6. Infrastructure Components
 
-- **Load Balancer**
-  - Provided by the hosting platform—distributes API requests across function instances.
+• Load balancing
+  - Built into Vercel’s serverless platform; requests route to the nearest edge node.
 
-- **CDN (Content Delivery Network)**
-  - Vercel’s global edge network caches static assets (CSS, JS, images) for faster page loads.
+• Caching mechanisms
+  - Next.js Incremental Static Regeneration (ISR): cache product pages and revalidate in the background.  
+  - HTTP cache headers on API responses where appropriate.
 
-- **Caching**
-  - **Redis** (optional) for session storage or caching dashboard queries to reduce database load.
+• Content Delivery Network (CDN)
+  - Vercel Edge Network caches static assets (images, CSS, JS) at points of presence around the world.
 
-- **Object Storage**
-  - For file uploads or backups, integrate with AWS S3 or similar services.
+• Database hosting
+  - Managed PostgreSQL (on-premise or cloud provider like Supabase/Heroku/RDS) with automated backups and scaling.
 
-- **Message Queue**
-  - In future, use **RabbitMQ** or **Kafka** for background tasks (e.g., email notifications).
+• Containerization (local only)
+  - Docker images for the app and database ensure everyone develops against the same environment.
+
+---
 
 ## 7. Security Measures
 
-- **Authentication & Authorization**
-  - Passwords hashed with **bcrypt** and salted.  
-  - Session tokens stored in secure, HttpOnly cookies or Authorization headers.  
-  - Protected endpoints verify tokens before proceeding.
+• Authentication & authorization
+  - Better Auth handles hashing, session cookies, and token management.  
+  - Middleware checks ensure only authenticated users can access protected routes (e.g., orders, dashboard).
 
-- **Data Encryption**
-  - **HTTPS/TLS** encrypts data in transit.  
-  - Database connections use SSL to encrypt data between the app and the database.
+• Data encryption
+  - TLS/HTTPS enforced in production.  
+  - Managed database encryption at rest (provided by cloud host).
 
-- **Input Validation**
-  - Every incoming request is validated (e.g., valid email format, password length) to prevent SQL injection or other attacks.
+• Secret management
+  - Environment variables stored securely in Vercel or a secrets manager (no secrets in code).  
 
-- **Web Security Best Practices**
-  - Enable **CORS** policies to limit allowed origins.  
-  - Use **CSRF tokens** or same-site cookies to prevent cross-site requests.  
-  - Set secure headers with **Helmet** or a similar middleware.
+• Additional best practices
+  - Rate limiting on sensitive endpoints to prevent brute-force attacks.  
+  - HTTP security headers (Content Security Policy, X-Frame-Options, etc.) via next-helmet or Vercel Edge Middleware.  
+  - Input validation with libraries like Zod to prevent SQL injection and XSS.
+
+---
 
 ## 8. Monitoring and Maintenance
 
-- **Performance Monitoring**
-  - Integrate **Sentry** or **LogRocket** for real-time crash reporting and performance tracing.  
-  - Use Vercel’s built-in analytics to track request latencies and error rates.
+• Performance monitoring
+  - Vercel Analytics: real-time insights into traffic, latency, and error rates.  
+  - Optionally integrate Sentry for detailed error tracking and performance profiling.
 
-- **Logging**
-  - Structured logs (JSON) for all API requests and errors, shipped to a log management service like **Datadog** or **Logflare**.
+• Logging
+  - Built-in logs in Vercel dashboard for serverless functions.  
+  - Console and application logs captured during development via Docker logs.
 
-- **Health Checks**
-  - Define a `/health` endpoint that returns a 200 status if the service is up and the database is reachable.
+• CI/CD
+  - GitHub Actions or Vercel Git integration runs automated tests and linters on each PR.  
 
-- **Maintenance Strategies**
-  - Automated migrations run on deploy to keep the database schema up to date.  
-  - Scheduled dependency audits and security scans (e.g., `npm audit`).
-  - Regular backups of the database (daily or weekly depending on usage).
+• Maintenance strategies
+  - Regular dependency updates using tools like Dependabot.  
+  - Scheduled database backups and health checks.  
+  - Periodic security audits and vulnerability scans.
+
+---
 
 ## 9. Conclusion and Overall Backend Summary
 
-The backend for **codeguide-starter** is built on Next.js API Routes and Node.js, paired with PostgreSQL for data and optional Redis for caching. It follows a clear layered architecture that keeps code easy to maintain and extend. With RESTful endpoints for authentication and data, secure practices like password hashing and HTTPS, and hosting on Vercel for scalability and global performance, this setup meets the project’s goals for a fast, secure, and developer-friendly foundation. Future enhancements—such as background job queues, advanced monitoring, or richer data models—can be added without disrupting the core structure.
+The backend for codeguide-flower-ecommerce is a modern, full-stack solution built on Next.js API Routes, Better Auth, and PostgreSQL with Drizzle ORM. It is designed for:
+
+• Scalability: serverless functions and managed database scale automatically.  
+• Maintainability: TypeScript, clear folder structure, and migrations keep the codebase clean and easy to evolve.  
+• Performance: SSR, ISR, and a global CDN ensure fast page loads and great SEO.  
+• Security: robust authentication, encrypted data, and best practices protect customer information.
+
+With this foundation in place, extending the platform—whether adding new product features, a shopping cart, payment integration, or an admin dashboard—will be straightforward and reliable.
